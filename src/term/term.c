@@ -60,11 +60,10 @@
 #undef putc     // Use the function, not the macro
 #undef putchar  // Use the function, not the macro
 
-#define _INPUT_BUF_SIZE_        256 // Make this a power of 2
 #define _TERM_INFO_MAX_          31 // Maximum term info string response read
 #define _TERM_NAME_MAX_          31 // Maximum size of term name response read
 
-static char _input_buf[_INPUT_BUF_SIZE_];
+static char _input_buf[TERM_INPUT_BUF_SIZE];
 static bool _input_buf_overflow = false;
 static uint16_t _input_buf_in = 0;
 static uint16_t _input_buf_out = 0;
@@ -122,14 +121,14 @@ static void _stdio_chars_available(void *param) {
     int ci;
     while (PICO_ERROR_TIMEOUT != (ci = getchar_timeout_us(0))) {
         // See if we have room for it in the input buffer
-        if (((_input_buf_in + 1) % _INPUT_BUF_SIZE_) == _input_buf_out) {
+        if (((_input_buf_in + 1) % TERM_INPUT_BUF_SIZE) == _input_buf_out) {
             // No room. Just throw it away.
             _input_buf_overflow = true;
         }
         else {
             // Store it, then continue reading
             _input_buf[_input_buf_in] = (char)ci;
-            _input_buf_in = (_input_buf_in + 1) % _INPUT_BUF_SIZE_;
+            _input_buf_in = (_input_buf_in + 1) % TERM_INPUT_BUF_SIZE;
         }
     }
     if (_term_notify_on_input != NULL && term_input_available()) {
@@ -235,6 +234,10 @@ inline void term_erase_line() {
     printf("%s2K", CSI);
 }
 
+int term_get_input_buf_size() {
+    return (TERM_INPUT_BUF_SIZE);
+}
+
 scr_position_t term_get_cursor_position(void) {
     char buf[16];
     scr_position_t pos = {-1,-1};
@@ -274,7 +277,7 @@ int term_getc(void) {
         return (-1);
     }
     int c = _input_buf[_input_buf_out];
-    _input_buf_out = (_input_buf_out + 1) % _INPUT_BUF_SIZE_;
+    _input_buf_out = (_input_buf_out + 1) % TERM_INPUT_BUF_SIZE;
 
     return (c);
 }
@@ -298,6 +301,8 @@ void term_init1() {
  * @note This must be called while `sleep` is allowed.
  */
 void term_init() {
+    // Make sure the buffer size is a power of 2
+    assert((TERM_INPUT_BUF_SIZE & (TERM_INPUT_BUF_SIZE - 1)) == 0);
     // Terminal type and screen size...
     term_reset();
     sleep_ms(100); // Allow the terminal to reset.

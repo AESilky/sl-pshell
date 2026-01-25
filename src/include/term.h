@@ -40,6 +40,11 @@ typedef struct _scr_position_ {
     uint16_t column;
 } scr_position_t;
 
+#ifndef TERM_INPUT_BUF_SIZE
+/** @brief Terminal input buffer size. This must be a power of 2 */
+#define TERM_INPUT_BUF_SIZE        256
+#endif
+
 // Define to debug terminal control sequences
 //#define _TERM_CONTROL_DEBUG_
 
@@ -168,7 +173,7 @@ typedef enum _VT_CHARSET_ {
 /**
  * @brief Set the terminal character set.
  * @ingroup term
- * 
+ *
  * @param cs vt_charset_t to use
  */
 extern void term_charset(vt_charset_t cs);
@@ -338,6 +343,14 @@ extern void term_erase_eol(void);
  *
  */
 extern void term_erase_line(void);
+
+/**
+ * @brief Get the size of the input buffer.
+ * @ingroup term
+ *
+ * @return int Size of the buffer
+ */
+int term_get_input_buf_size();
 
 /**
  * @brief Get the current cursor position.

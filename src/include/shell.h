@@ -52,7 +52,10 @@ typedef struct _TERM_COLOR_PAIR_ {
     term_color_t bg;
 } term_color_pair_t;
 
-#define SHELL_GETLINE_MAX_LEN  256 // Maximum line length (including /0) for the `term_getline` function
+#ifndef SHELL_GETLINE_MAX_LEN
+/** @brief Shell input line length. Used to acquire input from the user. Must be a power of 2 */
+#define SHELL_GETLINE_MAX_LEN TERM_INPUT_BUF_SIZE
+#endif
 
 /**
  * @brief Function prototype registered to handle control characters.

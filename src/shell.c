@@ -151,7 +151,7 @@ static void _getline_continue() {
 static void _host_welcome() {
     // Now to a full init of the terminal
     term_init();
-    term_set_title(shell_NAME_VERSION);
+    term_set_title(_shell_title);
     term_text_normal();
     // Tell the Host hello
     shell_puts(_shell_title);
