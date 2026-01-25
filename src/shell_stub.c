@@ -11,6 +11,6 @@ void shell_start() {
     // Do nothing
 }
 
-void shell_modinit() {
+extern void shell_modinit(__unused const char* shell_title, __unused shell_notify_fn notify_of_char_rdy);
     // Do nothing
 }
