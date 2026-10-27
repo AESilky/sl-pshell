@@ -26,18 +26,12 @@ extern "C" {
 
 // Code display color
 #ifndef shell_APP_COLOR_FG
-    #define shell_APP_COLOR_FG TERM_CHR_COLOR_GREEN
-#endif
-#ifndef shell_APP_COLOR_BG
-    #define shell_APP_COLOR_BG TERM_CHR_COLOR_BLACK
+#define shell_APP_COLOR_FG TERM_FGCHR_COLOR_DEF
 #endif
 
 // Command color
 #ifndef shell_CMD_COLOR_FG
-    #define shell_CMD_COLOR_FG TERM_CHR_COLOR_BR_CYAN
-#endif
-#ifndef shell_CMD_COLOR_BG
-    #define shell_CMD_COLOR_BG TERM_CHR_COLOR_BLACK
+#define shell_CMD_COLOR_FG TERM_FGCHR_COLOR_CYAN
 #endif
 
 // Labels
@@ -47,9 +41,11 @@ extern "C" {
 
 typedef void (*shell_notify_fn)(void);
 
+typedef const char* (*shell_prompt_prov_fn)(void);
+
 typedef struct _TERM_COLOR_PAIR_ {
-    term_color_t fg;
-    term_color_t bg;
+    term_fgcolor_t fg;
+    term_bgcolor_t bg;
 } term_color_pair_t;
 
 #ifndef SHELL_GETLINE_MAX_LEN
@@ -151,17 +147,6 @@ extern term_color_pair_t shell_color_get();
 extern void shell_color_refresh();
 
 /**
- * @brief Set and save text forground and background colors.
- * @ingroup shell
- *
- * This should be used to set a screen color that can restored when needed.
- *
- * @param fg The color number for the foreground
- * @param bg The color number for the background
- */
-extern void shell_color_set(term_color_t fg, term_color_t bg);
-
-/**
  * @brief Must be called when an input character is ready to be processed.
  * @ingroup shell
  *
@@ -174,6 +159,17 @@ extern void shell_do_input_char_ready();
  *
  */
 extern void shell_do_term_init();
+
+/**
+ * @brief Get the prompt string
+ * @ingroup shell
+ *
+ * The prompt string to display.
+ * @see shell_set_promptprov To set a prompt provider
+ *
+ * @return const char* The prompt
+ */
+extern const char* shell_get_prompt();
 
 /**
  * @brief Get a line of user input. Returns immediately. Calls back when line is ready.
@@ -260,6 +256,23 @@ extern int shell_printf(const char* format, ...) __attribute__((format(_printf_,
 extern int shell_printferr(const char* format, ...) __attribute__((format(_printf_, 1, 2)));
 
 /**
+ * @brief Display the shell prompt
+ * @ingroup shell
+ *
+ * This displays the prompt.
+ *
+ */
+extern void shell_prompt();
+
+/**
+ * @brief Redisplay the prompt, including any input so far
+ * @ingroup shell
+ *
+ * Used to redisplay the current prompt line.
+ */
+extern void shell_prompt_again();
+
+/**
  * @brief Print the code-text string. This is 0-n spaces and a character.
  * @ingroup shell
  *
@@ -320,6 +333,23 @@ extern shell_escape_seq_handler shell_register_esc_seq_handler(sescseq_t escseq,
  * @return The previously registered handler
  */
 extern shell_input_available_handler shell_register_input_available_handler(shell_input_available_handler handler_fn);
+
+/**
+ * @brief Set a prompt provider
+ * @ingroup shell
+ *
+ *
+ * @param fn shell_prompt_prov_fn function that provides a prompt string
+ */
+extern void shell_set_promptprov(shell_prompt_prov_fn fn);
+
+/**
+ * @brief Set the shell text color. This is preferred over setting both the foreground and background.
+ * @ingroup shell
+ *
+ * @param fg The text (foreground) color to use
+ */
+extern void shell_set_text_color(term_fgcolor_t fg);
 
 /**
  * @brief Set the color to the output display color.

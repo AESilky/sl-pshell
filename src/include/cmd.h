@@ -20,7 +20,7 @@ extern "C" {
 
 #define CMD_REINIT_TERM_CHAR '\022' // ^R
 
-#define CMD_PROMPT ':'
+#define CMD_DEF_PROMPT ":"
 
 typedef enum _CMD_STATES_ {
     CMD_SNOOZING,   // Waiting for user input to wake us up
