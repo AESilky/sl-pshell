@@ -539,7 +539,6 @@ void cmd_modinit(shell_notify_fn notify_of_reinit_reqst) {
     cmd_register(&_cmd_cls_entry);              // Clear Screen
     cmd_register(&_cmd_dec_entry);
     cmd_register(&_cmd_ecl_entry);
-    cmd_register(&_cmd_keys_entry);
     cmd_register(&_cmd_help_entry);
     cmd_register(&_cmd_hex_entry);
 
