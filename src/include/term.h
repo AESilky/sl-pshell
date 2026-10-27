@@ -317,6 +317,23 @@ extern void term_cursor_up(uint16_t n);
 extern void term_cursor_up_1(void);
 
 /**
+ * @brief Delete the character at the cursor and shift rest of line left.
+ * @ingroup term
+ * 
+ * This deletes a single character.
+ * @see term_erase_char to delete multiple characters
+ */
+extern void term_delete_char_at_cursor();
+
+/**
+ * @brief Delete the character to the left of the cursor and shift the rest of line left.
+ * @ingroup term
+ * 
+ * Combines the 'move left' and 'delete char at cursor' into a single operation.
+ */
+extern void term_delete_char_left(void);
+
+/**
  * @brief Erase from the cursor to the beginning of the line.
  * @ingroup term
  *

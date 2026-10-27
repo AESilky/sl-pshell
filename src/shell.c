@@ -17,7 +17,7 @@
 #include <string.h>
 
 #define ESC_NOT_IN_PROGRESS (-1)
-#define ESC_CHARS_MAX 20
+#define ESC_CHARS_MAX 16
 
 static bool _modinit_called;
 static bool _started;
@@ -33,8 +33,12 @@ static shell_control_char_handler _control_char_handler[32]; // Room for a handl
 
 static shell_escape_seq_handler _escseq_handler[_SEH_NUM]; // Room for the ESC Sequences that we support
 
-static char _getline_buf[SHELL_GETLINE_MAX_LEN];
-static int16_t _getline_index;
+static char _line_buf[SHELL_GETLINE_MAX_LEN];
+static int16_t _line_len;   // Total characters currently in the buffer
+static int16_t _cursor_ndx; // Current logical insertion/deletion point (0 to line_len)
+
+// static char _getline_buf[SHELL_GETLINE_MAX_LEN];
+// static int16_t _getline_index;
 
 static int _esc_collecting; // If -1, not collecting. Else, index to store the next received character until done.
 static char _esc_collected[ESC_CHARS_MAX + 1]; // Room to collect characters for an escape sequence.
@@ -50,22 +54,122 @@ static shell_input_available_handler _input_available_handler;
 static shell_getline_callback_fn _getline_callback; // Function pointer to be called when an input line is ready
 
 static void _host_welcome();
+static bool _lb_append(char c);
+static bool _lb_shift_right();
 static bool _process_char(char c, bool process_ctrl);
 
-
-static void _do_backspace() {
-    if (_getline_index > 0) {
-        _getline_index--;
-        term_cursor_left_1();
-        term_erase_char(1);
+// Helper to refresh the terminal view inline from the current cursor position forward
+void _refresh_linert_from_cursor(bool advance_cur) {
+    // Save current physical position by writing out remaining characters
+    for (int i = _cursor_ndx; i < _line_len; i++) {
+        putchar(_line_buf[i]);
     }
-    _getline_buf[_getline_index] = '\0';
+    // Erase any leftover visual characters at the end of the terminal line
+    term_erase_eol();
+    // Move terminal cursor physically back to its proper position
+    int cadj = (advance_cur ? 1 : 0);
+    int move_back = _line_len - (_cursor_ndx + cadj);
+    if (move_back > 0) {
+        term_cursor_left(move_back);
+    }
 }
 
-static bool _handle_es_backspace(sescseq_t escseq, const char* escstr) {
-    // Left-Arrow (ESC[D) can be typed rather than the Backspace.
-    _do_backspace();
-    return (true);
+/**
+ * @brief Add a character at the cursor location (within line or append) and display.
+ * 
+ * @param c Character to add 
+ * @return bool true: Character added. false: Unable to add character (probably line full).
+ */
+static bool _lb_add_at_cursor(char c) {
+    bool retval = true;
+    if (_cursor_ndx == _line_len) {
+        // Adding to the end, use append.
+        if (_lb_append(c)) {
+            putchar(c);
+            goto FINALLY_;
+        }
+        retval = false;
+        goto FINALLY_;
+    }
+    else {
+        // Adding within the line
+        _lb_shift_right();
+        _line_buf[_cursor_ndx] = c;
+        _refresh_linert_from_cursor(true);
+        _cursor_ndx++;
+    }
+FINALLY_:
+    return (retval);
+}
+
+/** 
+ * @brief Append a char to the line buffer if possible
+ * 
+ * After appending, updates _line_len and sets _cursor_ndx to _line_len.
+ * 
+ * @return true: Character appended. false: EOL, character cannot be appended.
+ * 
+ */
+static bool _lb_append(char c) {
+    if (!(_line_len < (SHELL_GETLINE_MAX_LEN - 1))) {
+        return false; // At the end of the line, can't append
+    }
+    _line_buf[_line_len++] = c;
+    _cursor_ndx = _line_len;
+    return true;
+}
+
+/**
+ * @brief Shift the _line_buf content from _cursor_ndx to _line_len left `n` positions
+ * 
+ * Shifts the line content left by `n` characters up to the _cursor_inx.
+ * @param n The number of left character shifts to perform
+ * @return The number shifted (if less than `n` there weren't enough positions to the left)
+ */
+static int16_t _lb_shift_left(int16_t n) {
+    int16_t lfshft = (n <= _cursor_ndx ? n : _cursor_ndx);
+    int16_t f = _cursor_ndx;
+    int16_t t = _cursor_ndx - lfshft;
+    int16_t sc = _line_len - _cursor_ndx;
+    // Shift remaining trailing data left over the old character spots
+    memmove(&_line_buf[t], &_line_buf[f], sc);
+    _cursor_ndx -= lfshft;
+    _line_len -= lfshft;
+    return lfshft;
+}
+
+/**
+ * @brief Shift the _line_buf content from _cursor_ndx to _line_len right
+ *
+ * Shifts the line content right by 1 character if the line length will accept it.
+ * @return true: Line was shifted. False: Line couldn't be shifted (line is max length).
+ */
+static bool _lb_shift_right() {
+    if (!(_line_len < (SHELL_GETLINE_MAX_LEN - 1))) {
+        return false; // The line is full, cannot shift
+    }
+    int16_t f = _cursor_ndx;
+    int16_t t = f+1;
+    int16_t sc = (_line_len - _cursor_ndx);
+    // Shift the characters after the cursor
+    memmove(&_line_buf[t], &_line_buf[f], sc);
+    _line_len++;
+    return true;
+}
+
+static void _do_backspace() {
+    if (_lb_shift_left(1)) {
+        term_delete_char_left();
+    }
+}
+
+static void _do_delatcur() {
+    // Check that we aren't at the end of the line
+    if (_cursor_ndx < _line_len) {
+        _cursor_ndx++;
+        _lb_shift_left(1);
+        term_delete_char_at_cursor();
+    }
 }
 
 /**
@@ -76,29 +180,6 @@ static void _handle_term_init() {
     _host_welcome();
 }
 
-
-/**
- * @brief Must be called when an input character is ready to be processed.
- * @ingroup shell
- *
- * @param msg Nothing important in the message.
- */
-void shell_do_input_char_ready() {
-    if (NULL != _input_available_handler) {
-        // If there is an input character, a host must be connected
-        _host_connected = true;
-        _input_available_handler();
-    }
-}
-
-/**
- * @brief Call to Init/ReInit the terminal (connected)
- * @ingroup shell
- *
- */
-void shell_do_term_init() {
-    _host_welcome();
-}
 
 /**
  * @brief A `term_notify_on_input_fn` handler for input ready.
@@ -139,6 +220,7 @@ static void _getline_continue() {
             if (!shell_handle_control_character(c)) {
                 // Control or 8-bit character we don't deal with
                 putchar(BEL);
+                _esc_collecting = ESC_NOT_IN_PROGRESS;
             }
         }
         // `while` will see if there are more chars available
@@ -146,6 +228,55 @@ static void _getline_continue() {
     // No more input chars are available, but we haven't gotten EOL yet,
     // hook for more to wake back up...
     term_register_notify_on_input(_input_ready_hook);
+}
+
+static bool _ehandle_cur_end(sescseq_t escseq, const char* escstr) {
+    shell_getline_end();
+    return true;
+}
+
+static bool _ehandle_cur_home(sescseq_t escseq, const char* escstr) {
+    shell_getline_home();
+    return true;
+}
+
+static bool _ehandle_cur_left(sescseq_t escseq, const char* escstr) {
+    if (_cursor_ndx > 0) {
+        _cursor_ndx--;
+        term_cursor_left_1();
+    }
+    return true;
+}
+
+static bool _ehandle_cur_right(sescseq_t escseq, const char* escstr) {
+    if (_cursor_ndx < _line_len) {
+        _cursor_ndx++;
+        term_cursor_right_1();
+    }
+    return true;
+}
+
+static bool _ehandle_delatcur(sescseq_t escseq, const char* escstr) {
+    _do_delatcur();
+    return true;
+}
+
+static void _handle_backspace(char c) {
+    _do_backspace();
+}
+
+static void _handle_cancel_line(char c) {
+    // ^X CAN (Cancel) - Erases the current input
+    if (_cursor_ndx > 0) {
+        term_cursor_left(_cursor_ndx);
+        term_erase_eol();
+    }
+    _cursor_ndx = 0;
+    _line_len = 0;
+}
+
+static void _handle_delatcur(char c) {
+    _do_delatcur();
 }
 
 static void _host_welcome() {
@@ -163,65 +294,143 @@ static void _host_welcome() {
 
 static bool _process_char(char c, bool process_ctrl) {
     bool processed = false;
-    shell_getline_callback_fn fn = _getline_callback;
+    shell_getline_callback_fn handle_line = _getline_callback;
 
     if (process_ctrl) {
         // See if we are processing an ESC sequence.
-        if (_esc_collecting >= 0) {
+        if (_esc_collecting != ESC_NOT_IN_PROGRESS) {
+            // Yes...
             if (_esc_collecting == 0) {
                 // We are looking for CSI, see if this is it.
                 if ('[' == c) {
                     _esc_collected[_esc_collecting++] = c;
                     _esc_collected[_esc_collecting] = '\0';
                     processed = true;
+                    goto FINALLY_;
                 }
                 else {
                     _esc_collecting = ESC_NOT_IN_PROGRESS;
+                    goto PROC_AS_PLAIN_;
                 }
             }
             else {
                 // We are into the sequence, see if we have collected the whole thing.
                 //
+                int escndx = _esc_collecting;
+                shell_escape_seq_handler fn = NULL;
                 _esc_collected[_esc_collecting++] = c;
                 _esc_collected[_esc_collecting] = '\0';
-                // 'Up Arrow' "CSI A"
-                if (_esc_collecting == 2 && 'A' == c) {
-                    // This is 'Up Arrow'
-                    shell_escape_seq_handler fn = _get_escseq_handler(SES_KEY_ARROW_UP);
-                    if (fn) {
-                        processed = fn(SES_KEY_ARROW_UP, _esc_collected);
+                //  If c is an uppercase character it marks the end of the sequence.
+                //  See if it is one we handle.
+                if (c >= 'A' && c <= 'Z') {
+                    _esc_collecting = ESC_NOT_IN_PROGRESS;
+                    // The uppercase character sequences we handle are all just after the CSI
+                    if (escndx == 1) {
+                        // 'Up Arrow' "CSI A"
+                        if ('A' == c) {
+                            fn = _get_escseq_handler(SES_KEY_ARROW_UP);
+                            if (fn) {
+                                processed = fn(SES_KEY_ARROW_UP, _esc_collected);
+                            }
+                            goto ESC_FINISH_;
+                        }
+                        // 'Down Arrow' "CSI B"
+                        if ('B' == c) {
+                            fn = _get_escseq_handler(SES_KEY_ARROW_DN);
+                            if (fn) {
+                                processed = fn(SES_KEY_ARROW_DN, _esc_collected);
+                            }
+                            goto ESC_FINISH_;
+                        }
+                        // 'Right Arrow' "CSI C"
+                        if ('C' == c) {
+                            fn = _get_escseq_handler(SES_KEY_ARROW_RT);
+                            if (fn) {
+                                processed = fn(SES_KEY_ARROW_RT, _esc_collected);
+                            }
+                            goto ESC_FINISH_;
+                        }
+                        // 'Left Arrow' "CSI D"
+                        if ('D' == c) {
+                            fn = _get_escseq_handler(SES_KEY_ARROW_LF);
+                            if (fn) {
+                                processed = fn(SES_KEY_ARROW_LF, _esc_collected);
+                            }
+                            goto ESC_FINISH_;
+                        }
+                        // 'END' "CSI F"
+                        if ('F' == c) {
+                            fn = _get_escseq_handler(SES_KEY_END);
+                            if (fn) {
+                                processed = fn(SES_KEY_END, _esc_collected);
+                            }
+                            goto ESC_FINISH_;
+                        }
+                        // 'HOME' "CSI H"
+                        if ('H' == c) {
+                            fn = _get_escseq_handler(SES_KEY_HOME);
+                            if (fn) {
+                                processed = fn(SES_KEY_HOME, _esc_collected);
+                            }
+                            goto ESC_FINISH_;
+                        }
                     }
                 }
-                // 'Down Arrow' "CSI B"
-                if (_esc_collecting == 2 && 'B' == c) {
-                    // This is 'Down Arrow'
-                    shell_escape_seq_handler fn = _get_escseq_handler(SES_KEY_ARROW_DN);
-                    if (fn) {
-                        processed = fn(SES_KEY_ARROW_DN, _esc_collected);
+                // See if this is the end of other (non uppercase letter) sequences
+                else if (c == '~') {
+                    // It is.
+                    _esc_collecting = ESC_NOT_IN_PROGRESS;
+                    // See if it is one we handle
+                    char ec = _esc_collected[escndx - 1]; // Get the character before the ~
+                    // 'HOME' "CSI 1~"
+                    if (ec == '1') {
+                        fn = _get_escseq_handler(SES_KEY_HOME);
+                        if (fn) {
+                            processed = fn(SES_KEY_HOME, _esc_collected);
+                        }
+                        goto ESC_FINISH_;
+                    }
+                    // 'DEL-FWD' "CSI 3~"
+                    if (ec == '3') {
+                        fn = _get_escseq_handler(SES_KEY_FDEL);
+                        if (fn) {
+                            processed = fn(SES_KEY_FDEL, _esc_collected);
+                        }
+                        goto ESC_FINISH_;
+                    }
+                    // 'END' "CSI 4~"
+                    if (ec == '4') {
+                        fn = _get_escseq_handler(SES_KEY_END);
+                        if (fn) {
+                            processed = fn(SES_KEY_END, _esc_collected);
+                        }
+                        goto ESC_FINISH_;
                     }
                 }
-                // 'Right Arrow' "CSI C"
-                if (_esc_collecting == 2 && 'C' == c) {
-                    // This is 'Right Arrow'
-                    shell_escape_seq_handler fn = _get_escseq_handler(SES_KEY_ARROW_RT);
-                    if (fn) {
-                        processed = fn(SES_KEY_ARROW_RT, _esc_collected);
+ESC_FINISH_:
+                // Check to see if we have abandoned the sequence (not one we handle, or too many characters)
+                if (!processed && (_esc_collecting == ESC_NOT_IN_PROGRESS || _esc_collecting >= ESC_CHARS_MAX)) {
+                    // We have abandoned it - put the collected characters into the line buffer
+                    int cti = escndx + 1;
+                    if ((_line_len + cti) >= SHELL_GETLINE_MAX_LEN) {
+                        cti = SHELL_GETLINE_MAX_LEN - (_line_len + 1);
+                        shell_putc(BEL);
                     }
-                }
-                // 'Left Arrow' "CSI D"
-                if (_esc_collecting == 2 && 'D' == c) {
-                    // This is 'Left Arrow'
-                    shell_escape_seq_handler fn = _get_escseq_handler(SES_KEY_ARROW_LF);
-                    if (fn) {
-                        processed = fn(SES_KEY_ARROW_LF, _esc_collected);
+                    if (_cursor_ndx < _line_len) {
+                        memmove(&_line_buf[_cursor_ndx + cti], &_line_buf[_cursor_ndx], _line_len - _cursor_ndx);
                     }
+                    memmove(&_line_buf[_cursor_ndx], &_esc_collected[0], cti);
+                    _line_len += cti;
+                    _refresh_linert_from_cursor(false);
+                    _cursor_ndx += cti;
+                    term_cursor_right(cti);
+                    processed = true;
+                    goto FINALLY_;
                 }
-                _esc_collecting = ESC_NOT_IN_PROGRESS;
-            }
-            if (_esc_collecting >= ESC_CHARS_MAX) {
-                // We've collected as many characters as we can hold and we haven't received
-                // something that we can process. Reset the ESC state.
-                _esc_collecting = ESC_NOT_IN_PROGRESS;
+                else {
+                    // We collected the character, so say that it is processed
+                    processed = true;
+                }
             }
         }
         else {
@@ -229,19 +438,14 @@ static bool _process_char(char c, bool process_ctrl) {
             case '\n':
             case '\r':
                 // EOL - Terminate the input line and give to callback.
-                _getline_buf[_getline_index] = '\0';
+                _line_buf[_line_len] = '\0';
                 _getline_callback = NULL;
                 _input_available_handler = NULL; // Cleared when called
-                fn(_getline_buf);
-                _getline_index = 0;
-                _getline_buf[_getline_index] = '\0';
+                handle_line(_line_buf);
+                _line_len = 0;
+                _cursor_ndx = 0;
+                _line_buf[_line_len] = '\0';
                 return (true);
-                break;
-            case BS:
-            case DEL:
-                // Backspace/Delete - move back if we aren't at the BOL
-                _do_backspace();
-                processed = true;
                 break;
             case ESC:
                 // First, see if there is a handler registered for ESC. If so, let it handle it.
@@ -253,25 +457,13 @@ static bool _process_char(char c, bool process_ctrl) {
                     processed = true;;
                 }
                 break;
-            case '\030':
-                // ^X Erases the current input
-                while (_getline_index > 0) {
-                    _getline_buf[_getline_index] = '\0';
-                    term_cursor_left_1();
-                    term_erase_char(1);
-                    _getline_index--;
-                }
-                _getline_index = 0;
-                _getline_buf[_getline_index] = '\0';
-                processed = true;
-                break;
             }
         }
     }
+PROC_AS_PLAIN_:
     if (!processed && c >= ' ' && c < DEL) {
-        if (_getline_index < (SHELL_GETLINE_MAX_LEN - 1)) {
-            _getline_buf[_getline_index++] = c;
-            putchar(c);
+        if (_line_len < (SHELL_GETLINE_MAX_LEN - 1)) {
+            _lb_add_at_cursor(c);
         }
         else {
             // Alert them that they are at the end
@@ -279,6 +471,7 @@ static bool _process_char(char c, bool process_ctrl) {
         }
         processed = true;
     }
+FINALLY_:
     return (processed);
 }
 
@@ -304,6 +497,29 @@ void shell_color_set(term_color_t fg, term_color_t bg) {
     term_color_fg(fg);
 }
 
+/**
+ * @brief Must be called when an input character is ready to be processed.
+ * @ingroup shell
+ *
+ * @param msg Nothing important in the message.
+ */
+void shell_do_input_char_ready() {
+    if (NULL != _input_available_handler) {
+        // If there is an input character, a host must be connected
+        _host_connected = true;
+        _input_available_handler();
+    }
+}
+
+/**
+ * @brief Call to Init/ReInit the terminal (connected)
+ * @ingroup shell
+ *
+ */
+void shell_do_term_init() {
+    _host_welcome();
+}
+
 void shell_getline(shell_getline_callback_fn getline_cb) {
     _getline_callback = getline_cb;
     shell_register_input_available_handler(_getline_continue);
@@ -313,20 +529,36 @@ void shell_getline(shell_getline_callback_fn getline_cb) {
 
 void shell_getline_append(const char* appndstr) {
     char c;
-    while ((c = *appndstr++) && (_getline_index < (SHELL_GETLINE_MAX_LEN - 1))) {
+    while ((c = *appndstr++) && (_line_len < (SHELL_GETLINE_MAX_LEN - 1))) {
         _process_char(c, false);
     }
 }
 
+void shell_getline_end() {
+    int n = _line_len - _cursor_ndx;
+    if (n > 0) {
+        _cursor_ndx = _line_len;
+        term_cursor_right(n);
+    }
+}
+
+void shell_getline_home() {
+    if (_cursor_ndx) {
+        term_cursor_left(_cursor_ndx);
+        _cursor_ndx = 0;
+    }
+}
+
 const char* shell_getline_buf() {
-    return (_getline_buf);
+    return (_line_buf);
 }
 
 void shell_getline_replace(const char* rplcstr) {
     int len = strlen(rplcstr);
     if (len < SHELL_GETLINE_MAX_LEN) {
-        strcpy(_getline_buf, rplcstr);
-        _getline_index = len;
+        strcpy(_line_buf, rplcstr);
+        _line_len = len;
+        _cursor_ndx = len;
         term_cursor_on(false);
         term_cursor_bol();
         term_erase_line();
@@ -339,8 +571,9 @@ void shell_getline_replace(const char* rplcstr) {
 void shell_getline_cancel(shell_input_available_handler input_handler) {
     _getline_callback = NULL;
     shell_register_input_available_handler(input_handler);
-    _getline_index = 0;
-    _getline_buf[_getline_index] = '\0';
+    _line_len = 0;
+    _cursor_ndx = 0;
+    _line_buf[_line_len] = '\0';
 }
 
 bool shell_handle_control_character(char c) {
@@ -475,18 +708,26 @@ void shell_puts(const char* str) {
     }
 }
 
-void shell_register_control_char_handler(char c, shell_control_char_handler handler_fn) {
+shell_control_char_handler shell_register_control_char_handler(char c, shell_control_char_handler handler_fn) {
+    shell_control_char_handler ph = NULL;
     if (iscntrl(c)) {
-        _control_char_handler[(int)c] = handler_fn;
+        int ndx = (int)c;
+        ph = _control_char_handler[ndx];
+        _control_char_handler[ndx] = handler_fn;
     }
+    return ph;
 }
 
-void shell_register_esc_seq_handler(sescseq_t escseq, shell_escape_seq_handler handler_fn) {
+shell_escape_seq_handler shell_register_esc_seq_handler(sescseq_t escseq, shell_escape_seq_handler handler_fn) {
+    shell_escape_seq_handler ph = _escseq_handler[escseq];
     _escseq_handler[escseq] = handler_fn;
+    return ph;
 }
 
-void shell_register_input_available_handler(shell_input_available_handler handler_fn) {
+shell_input_available_handler shell_register_input_available_handler(shell_input_available_handler handler_fn) {
+    shell_input_available_handler ph = _input_available_handler;
     _input_available_handler = handler_fn;
+    return ph;
 }
 
 void shell_use_output_color() {
@@ -504,6 +745,16 @@ void shell_start() {
         panic("!!! Shell must be stopped to be started. !!!");
     }
     _started = true;
+
+    // Register our default Control Character and Escape Sequence handlers
+    shell_register_control_char_handler(BS, _handle_backspace);
+    shell_register_control_char_handler(DEL, _handle_delatcur);
+    shell_register_control_char_handler('\030', _handle_cancel_line);   // ^X CAN
+    shell_register_esc_seq_handler(SES_KEY_END, _ehandle_cur_end);
+    shell_register_esc_seq_handler(SES_KEY_HOME, _ehandle_cur_home);
+    shell_register_esc_seq_handler(SES_KEY_ARROW_LF, _ehandle_cur_left);
+    shell_register_esc_seq_handler(SES_KEY_ARROW_RT, _ehandle_cur_right);
+    shell_register_esc_seq_handler(SES_KEY_FDEL, _ehandle_delatcur);
 
     // Register our input handler with term
     term_register_notify_on_input(_input_ready_hook);
@@ -525,6 +776,11 @@ void shell_modinit(const char* shell_title, shell_notify_fn notify_of_char_rdy) 
 
     _shell_title = shell_title;
     _notify_of_char_rdy = (notify_of_char_rdy ? notify_of_char_rdy : shell_do_input_char_ready);
+
+    // Clear out the Control Char handlers
+    memset(_control_char_handler, 0, sizeof(_control_char_handler));
+    // Load our default control char handlers
+
 
     _esc_collecting = ESC_NOT_IN_PROGRESS;
     // Base terminal initialization
