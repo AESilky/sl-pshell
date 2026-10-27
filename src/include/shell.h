@@ -77,12 +77,17 @@ typedef void (*shell_control_char_handler)(char c);
  * @brief ENUM of the supported ESC sequences.
  */
 typedef enum SHELL_ESC_SEQUENCE_ {
-    SES_KEY_ARROW_UP = 0, // CSI A
-    SES_KEY_ARROW_DN = 1, // CSI B
-    SES_KEY_ARROW_RT = 2, // CSI C
-    SES_KEY_ARROW_LF = 3, // CSI D
+    SES_KEY_ARROW_UP = 0,       // CSI A
+    SES_KEY_ARROW_DN,           // CSI B
+    SES_KEY_ARROW_RT,           // CSI C
+    SES_KEY_ARROW_LF,           // CSI D
+    SES_KEY_END,                // CSI F or 4~
+    SES_KEY_HOME,               // CSI H
+    SES_KEY_FDEL,               // CSI 3~
+    // TBD... Function Keys
+    _SES_EOL
 } sescseq_t;
-#define _SEH_NUM (SES_KEY_ARROW_LF + 1)
+#define _SEH_NUM (_SES_EOL + 1)
 
 /**
  * @brief Function prototype for handlers to register for escape sequences.
@@ -205,6 +210,18 @@ extern const char* shell_getline_buf();
 extern void shell_getline_cancel(shell_input_available_handler input_handler);
 
 /**
+ * @brief Move the cursor to the end of the line. Additional input will append.
+ * @ingroup shell
+ */
+extern void shell_getline_end();
+
+/**
+ * @brief Move the cursor to the beginning of the line. Additional input will be inserted.
+ * @ingroup shell
+ */
+extern void shell_getline_home();
+
+/**
  * @brief Replace the current getline collected text.
  * @ingroup shell
  *
@@ -278,9 +295,10 @@ extern void shell_puts(const char* str);
  * @see `shell_control_char_handler` for a description of when this is used.
  *
  * @param c The control character to register the handler for.
- * @param handler_fn The handler.
+ * @param handler_fn The handler to register
+ * @return The previously registered handler
  */
-extern void shell_register_control_char_handler(char c, shell_control_char_handler handler_fn);
+extern shell_control_char_handler shell_register_control_char_handler(char c, shell_control_char_handler handler_fn);
 
 /**
  * @brief Register an ESC Sequence handler.
@@ -289,17 +307,19 @@ extern void shell_register_control_char_handler(char c, shell_control_char_handl
  * @see `shell_escape_seq_handler` for a description of when this is used.
  *
  * @param escseq The ESC Sequence to register the handler for.
- * @param handler_fn The handler.
+ * @param handler_fn The handler to register
+ * @return The previously registered handler
  */
-void shell_register_esc_seq_handler(sescseq_t escseq, shell_escape_seq_handler handler_fn);
+extern shell_escape_seq_handler shell_register_esc_seq_handler(sescseq_t escseq, shell_escape_seq_handler handler_fn);
 
 /**
  * @brief Register a function to handle terminal input available.
  * @ingroup shell
  *
- * @param handler_fn
+ * @param handler_fn The handler to register
+ * @return The previously registered handler
  */
-extern void shell_register_input_available_handler(shell_input_available_handler handler_fn);
+extern shell_input_available_handler shell_register_input_available_handler(shell_input_available_handler handler_fn);
 
 /**
  * @brief Set the color to the output display color.

@@ -140,98 +140,156 @@ static void _stdio_chars_available(void *param) {
     }
 }
 
-inline void term_charset(vt_charset_t cs) {
+/*
+ * NONE: The `term_xyz...` methods below were using `printf` with #defines for
+ *      `CSI`, `SCS`, `NEL`, etc. But, that adds a lot of overhead compared
+ *      to using `stdio_put_string` with constant/static strings (all characters
+ *      hardcoded into the single value). The `printf` version has been left
+ *      as a comment so that searches for the #define symbol should still
+ *      get to the point where the value is used.
+ * 
+ *      That leaves the use of `printf` to only the sequences that use a
+ *      variable argument.
+ */
+
+
+void term_charset(vt_charset_t cs) {
     printf("%s%c", SCS, (char)cs);
+    stdio_flush();
 }
 
-inline void term_clear(bool home) {
+void term_clear(bool home) {
     char* cs = (home ? "\e[H\e[2J" : "\e[2J");
     printf(cs); // Some guides indicate 'ESC c', but that is 'Reset' not just 'Clear'
+    stdio_flush();
 }
 
-inline void term_color_default() {
-    printf("%s39;49m", CSI);
+void term_color_default() {
+    //printf("%s39;49m", CSI);
+    stdio_put_string("\e[39;49m", 2+6, false, false);
+    stdio_flush();
 }
 
-inline void term_color_bg(term_color_t colorn) {
+void term_color_bg(term_color_t colorn) {
     printf("%s48;5;%dm", CSI, colorn);
+    stdio_flush();
 }
 
-inline void term_color_fg(term_color_t colorn) {
+void term_color_fg(term_color_t colorn) {
     printf("%s38;5;%dm", CSI, colorn);
+    stdio_flush();
 }
 
-inline void term_cursor_bol() {
+void term_cursor_bol() {
     putchar(CBOL);
+    stdio_flush();
 }
 
-inline void term_cursor_down(uint16_t n) {
+void term_cursor_down(uint16_t n) {
     printf("%s%hdB", CSI, n); // Also 'E'
+    stdio_flush();
 }
 
-inline void term_cursor_down_1(void) {
-    printf("%s", NEL);
+void term_cursor_down_1(void) {
+    //printf("%s", NEL);
+    stdio_put_string("\eE", 2, false, false);
+    stdio_flush();
 }
 
-inline void term_cursor_home(void) {
-    printf("%sH", CSI);
+void term_cursor_home(void) {
+    //printf("%sH", CSI);
+    stdio_put_string("\e[H", 2+1, false, false);
+    stdio_flush();
 }
 
-inline void term_cursor_left(uint16_t n) {
+void term_cursor_left(uint16_t n) {
     printf("%s%hdD", CSI, n);
+    stdio_flush();
 }
 
-inline void term_cursor_left_1(void) {
+void term_cursor_left_1(void) {
     putchar(BS);
+    stdio_flush();
 }
 
-inline void term_cursor_moveto(uint16_t line, uint16_t column) {
+void term_cursor_moveto(uint16_t line, uint16_t column) {
     printf("%s%hd;%hdH", CSI, line, column);
+    stdio_flush();
 }
 
 void term_cursor_on(bool on) {
     char onoff = (on ? 'h' : 'l');
     printf("%s?25%c", CSI, onoff); // VT220
+    stdio_flush();
 }
 
-inline void term_cursor_restore() {
-    printf("%c8", ESC);
+void term_cursor_restore() {
+    //printf("%c8", ESC);
+    stdio_put_string("\e8", 2, false, false);
+    stdio_flush();
 }
 
-inline void term_cursor_right(uint16_t n) {
+void term_cursor_right(uint16_t n) {
     printf("%s%hdC", CSI, n);
+    stdio_flush();
 }
 
-inline void term_cursor_right_1(void) {
-    printf("%sC", CSI);
+void term_cursor_right_1(void) {
+    //printf("%sC", CSI);
+    stdio_put_string("\e[C", 2+1, false, false);
+    stdio_flush();
 }
 
-inline void term_cursor_save() {
-    printf("%c7", ESC);
+void term_cursor_save() {
+    //printf("%c7", ESC);
+    stdio_put_string("\e7", 2, false, false);
+    stdio_flush();
 }
 
-inline void term_cursor_up(uint16_t n) {
+void term_cursor_up(uint16_t n) {
     printf("%s%hdA", CSI, n); // Also 'F'
+    stdio_flush();
 }
 
-inline void term_cursor_up_1(void) {
-    printf("%s", RI);
+void term_cursor_up_1(void) {
+    //printf("%s", RI);
+    stdio_put_string("\eM", 2, false, false);
+    stdio_flush();
 }
 
-inline void term_erase_bol() {
-    printf("%s1K", CSI);
+void term_delete_char_at_cursor() {
+    // CSI P translates to Delete Character (DCH)
+    stdio_put_string("\e[P", 2+1, false, false);
+    stdio_flush();
 }
 
-inline void term_erase_char(uint16_t n) {
+void term_delete_char_left(void) {
+    // CSI D (Move Left) + CSI P (Delete Character at cursor)
+    stdio_put_string("\e[D\e[P", 6, false, false);
+    stdio_flush();
+}
+
+void term_erase_bol() {
+    //printf("%s1K", CSI);
+    stdio_put_string("\e[1K", 2+2, false, false);
+    stdio_flush();
+}
+
+void term_erase_char(uint16_t n) {
     printf("%s%hdX", CSI, n); // Erase chars without moving cursor
+    stdio_flush();
 }
 
-inline void term_erase_eol() {
-    printf("%s0K", CSI);
+void term_erase_eol() {
+    //printf("%s0K", CSI);
+    stdio_put_string("\e[0K", 2+2, false, false);
+    stdio_flush();
 }
 
-inline void term_erase_line() {
-    printf("%s2K", CSI);
+void term_erase_line() {
+    //printf("%s2K", CSI);
+    stdio_put_string("\e[2K", 2+2, false, false);
+    stdio_flush();
 }
 
 int term_get_input_buf_size() {
@@ -312,7 +370,7 @@ void term_init() {
     term_get_name(_term_name, _TERM_NAME_MAX_);
     // Set the terminal type to one we want
     term_set_type(VT_220_TYPE_SPEC, VT_220_ID_SPEC);
-    term_set_size(48, 80);
+    // term_set_size(48, 80); ZZZ - Setting the terminal size causes problems with Putty
     term_color_default();
     term_cursor_on(true);
 }
@@ -345,7 +403,7 @@ void term_register_notify_on_input(term_notify_on_input_fn notify_fn) {
     _term_notify_on_input = notify_fn;
 }
 
-inline void term_reset() {
+void term_reset() {
     printf("%cc", ESC);
 }
 
@@ -417,7 +475,7 @@ void term_set_size(uint16_t lines, uint16_t columns) {
     term_clear(true);
 }
 
-inline void term_set_title(const char* title) {
+void term_set_title(const char* title) {
     printf("%s0;%s%s", OSC, title, ST);
 }
 
@@ -434,10 +492,10 @@ void term_set_type(vt_term_type_spec_t type, vt_term_id_spec_t id_type) {
     }
 }
 
-inline void term_text_bold() {
+void term_text_bold() {
     printf("%s1m", CSI);
 }
 
-inline void term_text_normal() {
+void term_text_normal() {
     printf("%s0m", CSI);
 }

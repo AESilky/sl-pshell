@@ -19,8 +19,6 @@ extern "C" {
 #include <stdint.h>
 
 #define CMD_REINIT_TERM_CHAR '\022' // ^R
-#define CMD_RECALL_LAST_CHAR '\013' // ^K
-#define CMD_RECALL_NEXT_CHAR '\014' // ^L
 
 #define CMD_PROMPT ':'
 

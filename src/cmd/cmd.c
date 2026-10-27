@@ -47,15 +47,25 @@ static shell_notify_fn _notify_of_reinit_reqst;
 // Command processor declarations
 static int _cmd_cls(int argc, char** argv, const char* unparsed);
 static int _cmd_dec(int argc, char** argv, const char* unparsed);
+static int _cmd_ecl(int argc, char** argv, const char* unparsed);
 static int _cmd_help(int argc, char** argv, const char* unparsed);
 static int _cmd_hex(int argc, char** argv, const char* unparsed);
-static int _cmd_keys(int argc, char** argv, const char* unparsed);
 static int _cmd_proc_status(int argc, char** argv, const char* unparsed);
 static void _process_line(char* line);
 
 static cmd_entry_ll_t* _cmds = (cmd_entry_ll_t*)0;
 
 // Command processors framework
+// // dot Commands
+static const cmd_handler_entry_t _cmd_ecl_entry = {
+    // Echo the command line (unparsed) or all of the parsed arguments
+    _cmd_ecl,
+    4,
+    ".ecl",
+    "[-p]",
+    "Echo the unparsed command line.\n  -p : Display each argument (as parsed).\n",
+};
+// // Commands
 static const cmd_handler_entry_t _cmd_cls_entry = {
     // Clear Screen
     _cmd_cls,
@@ -85,13 +95,6 @@ static const cmd_handler_entry_t _cmd_hex_entry = {
     "decimal1 [decimal2] [decimaln...]]",
     "Convert decimal value(s) to hex.\n",
 };
-static const cmd_handler_entry_t _cmd_keys_entry = {
-    _cmd_keys,
-    4,
-    "keys",
-    "",
-    "List of the keyboard control key actions.\n",
-};
 
 
 // Internal (non-command) declarations
@@ -108,7 +111,7 @@ static cmd_state_t _cmd_state = CMD_SNOOZING;
 
 static int _cmd_cls(int argc, char** argv, const char* unparsed) {
     if (argc > 1) {
-        cmd_help_display(&_cmd_cls_entry, HELP_DISP_USAGE);
+        cmd_help_display(&_cmd_cls_entry, HELP_INVALID_USAGE);
         return (-1);
     }
     term_clear(true);
@@ -122,7 +125,7 @@ static int _cmd_dec(int argc, char** argv, const char* unparsed) {
     argv++; argc--; // Move past the command name
     if (argc < 1) {
         // We need at least 1 value to convert
-        cmd_help_display(&_cmd_dec_entry, HELP_DISP_USAGE);
+        cmd_help_display(&_cmd_dec_entry, HELP_INVALID_USAGE);
         return (-1);
     }
     bool valid;
@@ -142,6 +145,33 @@ static int _cmd_dec(int argc, char** argv, const char* unparsed) {
         argv++; argc--;
     }
 
+    return (0);
+}
+
+static int _cmd_ecl(int argc, char** argv, const char* unparsed) {
+    bool disp_as_args = false;
+    // Make copies to allow modifying without disturbing
+    int ac = argc;
+    char** av = argv;
+
+    argv++;
+    if (argc > 1) {
+        // They entered an option
+        if (strcmp("-p", *argv) == 0) {
+            disp_as_args = true;
+        }
+    }
+    if (disp_as_args) {
+        int tac = ac;
+        while(ac) {
+            shell_printf("%3d: %s\n", tac-ac, *av);
+            ac--;
+            av++;
+        }
+    }
+    else {
+        shell_printf("%s\n", unparsed);
+    }
     return (0);
 }
 
@@ -205,7 +235,7 @@ static int _cmd_hex(int argc, char** argv, const char* unparsed) {
     argv++; argc--; // Move past the command name
     if (argc < 1) {
         // We need at least 1 value to convert
-        cmd_help_display(&_cmd_hex_entry, HELP_DISP_USAGE);
+        cmd_help_display(&_cmd_hex_entry, HELP_INVALID_USAGE);
         return (-1);
     }
     bool valid;
@@ -224,23 +254,6 @@ static int _cmd_hex(int argc, char** argv, const char* unparsed) {
         shell_printf(hdf, v);
         argv++; argc--;
     }
-
-    return (0);
-}
-
-static int _cmd_keys(int argc, char** argv, const char* unparsed) {
-    if (argc > 1) {
-        cmd_help_display(&_cmd_keys_entry, HELP_DISP_USAGE);
-        return (-1);
-    }
-#ifdef SD_CARD_SUPPORTED
-    shell_puts("^C             : Reset SD Card (use after card change).\n");
-#endif
-    shell_puts("^H or Lf-Arrow : Backspace (same as Backspace key on most terminals).\n");
-    shell_puts("^K or Up-Arrow : Recall last command (command history prior).\n");
-    shell_puts("^L or Dn-Arrow : Recall next command (command history next).\n");
-    shell_puts("^R             : Refresh the terminal screen.\n");
-    shell_puts("^X             : Clear the input line.\n");
 
     return (0);
 }
@@ -428,7 +441,13 @@ const cmd_state_t cmd_get_state() {
 void cmd_help_display(const cmd_handler_entry_t* cmd, const cmd_help_display_format_t type) {
     term_color_pair_t tc = shell_color_get();
     term_color_default();
-    if (HELP_DISP_USAGE == type) {
+    cmd_help_display_format_t typ = type;
+    if (HELP_INVALID_USAGE == typ) {
+        // Invalid Usage. Ring the BELL and then treat like DISP_USAGE
+        shell_putc(BEL);
+        typ = HELP_DISP_USAGE;
+    }
+    if (HELP_DISP_USAGE == typ) {
         shell_puts("Usage: ");
     }
     int name_min = cmd->min_match;
@@ -442,14 +461,14 @@ void cmd_help_display(const cmd_handler_entry_t* cmd, const cmd_help_display_for
     bool alias = (cmd->usage && (CMD_ALIAS_INDICATOR == *cmd->usage));
     if (!alias) {
         shell_printf("%s %s\n", name_rest, cmd->usage);
-        if (cmd->description && (HELP_DISP_LONG == type || HELP_DISP_USAGE == type)) {
+        if (cmd->description && (HELP_DISP_LONG == typ || HELP_DISP_USAGE == typ)) {
             shell_printf("  %s\n", cmd->description);
         }
     }
     else {
         const char* aliased_for_name = ((cmd->usage) + 1);
         shell_printf("%s  Alias for: %s\n", name_rest, aliased_for_name);
-        if (HELP_DISP_NAME != type) {
+        if (HELP_DISP_NAME != typ) {
             // Find the aliased entry
             const cmd_handler_entry_t* aliased_cmd = NULL;
             const cmd_handler_entry_t* cmd_chk;
@@ -467,7 +486,7 @@ void cmd_help_display(const cmd_handler_entry_t* cmd, const cmd_help_display_for
                 // Put the terminal colors back, and call this again with the aliased command
                 term_color_fg(tc.fg);
                 term_color_bg(tc.bg);
-                cmd_help_display(aliased_cmd, type);
+                cmd_help_display(aliased_cmd, typ);
             }
         }
     }
@@ -517,8 +536,9 @@ void cmd_modinit(shell_notify_fn notify_of_reinit_reqst) {
     _cmd_state = CMD_SNOOZING;
     //
     // Register our commands.
-    cmd_register(&_cmd_dec_entry);
     cmd_register(&_cmd_cls_entry);              // Clear Screen
+    cmd_register(&_cmd_dec_entry);
+    cmd_register(&_cmd_ecl_entry);
     cmd_register(&_cmd_keys_entry);
     cmd_register(&_cmd_help_entry);
     cmd_register(&_cmd_hex_entry);
@@ -531,8 +551,6 @@ void cmd_modinit(shell_notify_fn notify_of_reinit_reqst) {
 
     // Register the control character and escape sequence handlers.
     shell_register_control_char_handler(CMD_REINIT_TERM_CHAR, _handle_cc_reinit_terminal);
-    shell_register_control_char_handler(CMD_RECALL_LAST_CHAR, _handle_cc_recall_prior);
-    shell_register_control_char_handler(CMD_RECALL_NEXT_CHAR, _handle_cc_recall_next);
     shell_register_esc_seq_handler(SES_KEY_ARROW_UP, _handle_es_recall_prior);
     shell_register_esc_seq_handler(SES_KEY_ARROW_DN, _handle_es_recall_next);
 }

@@ -4,5 +4,15 @@
 			"path": "."
 		}
 	],
-	"settings": {}
+    "settings": {
+        "cSpell.words": [
+            "appndstr",
+            "colorn",
+            "escndx",
+            "escseq",
+            "escstr",
+            "lfshft",
+            "rtshft"
+        ]
+    }
 }
