@@ -170,14 +170,25 @@ void term_color_default() {
     stdio_flush();
 }
 
-void term_color_bg(term_color_t colorn) {
-    printf("%s48;5;%dm", CSI, colorn);
-    stdio_flush();
+inline void term_color_bg(term_bgcolor_t colorn) {
+    printf("%s%dm", CSI, colorn);
+    fflush(stdout);
 }
 
-void term_color_fg(term_color_t colorn) {
-    printf("%s38;5;%dm", CSI, colorn);
-    stdio_flush();
+inline void term_color_error(void) {
+    // Set text to BOLD RED
+    printf("%s1;31m", CSI);
+    fflush(stdout);
+}
+
+inline void term_color_fg(term_fgcolor_t colorn) {
+    printf("%s%dm", CSI, colorn);
+    fflush(stdout);
+}
+
+inline void term_color_fgbg(term_fgcolor_t fg, term_bgcolor_t bg) {
+    printf("%s%d%dm", CSI, fg, bg);
+    fflush(stdout);
 }
 
 void term_cursor_bol() {
